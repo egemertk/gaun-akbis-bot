@@ -15,6 +15,10 @@ on:
       - '**.py'
       - 'requirements.txt'
 
+# Repo'ya yazma izni ver
+permissions:
+  contents: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -22,6 +26,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Son commit'i al (database dosyası dahil)
+          fetch-depth: 0
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,4 +51,4 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add seen_announcements.db || true
           git diff --quiet && git diff --staged --quiet || git commit -m "Update seen announcements [skip ci]"
-          git push || true
+          git push || echo "Nothing to push"
