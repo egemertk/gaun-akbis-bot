@@ -3,6 +3,8 @@ AKBIS Telegram Bot - Ana Çalıştırma Scripti
 GitHub Actions tarafından periyodik olarak çağrılır.
 """
 import sys
+import json
+import os
 from datetime import datetime
 from typing import List
 
@@ -15,6 +17,23 @@ from database import (
 from telegram_bot import send_announcement, send_error_message
 
 
+def get_enabled_professor_ids() -> list:
+    """
+    preferences.json dosyasından aktif profesör ID'lerini al.
+    Dosya yoksa tüm profesörler aktif.
+    """
+    try:
+        if os.path.exists("preferences.json"):
+            with open("preferences.json", "r") as f:
+                prefs = json.load(f)
+                return prefs.get("enabled", list(range(len(AKBIS_PAGES))))
+    except:
+        pass
+    
+    # Varsayılan: tümü aktif
+    return list(range(len(AKBIS_PAGES)))
+
+
 def check_all_pages() -> List[Announcement]:
     """
     Tüm sayfaları kontrol et ve yeni duyuruları döndür.
@@ -25,19 +44,22 @@ def check_all_pages() -> List[Announcement]:
     """
     new_announcements = []
     
-    # Veritabanından aktif profesörleri al
-    enabled_profs = get_enabled_professors()
+    # preferences.json'dan aktif profesör ID'lerini al
+    enabled_ids = get_enabled_professor_ids()
     
-    if not enabled_profs:
+    if not enabled_ids:
         print("⚠️ Hiçbir profesör takip edilmiyor!")
         return []
     
-    print(f"📋 {len(enabled_profs)} profesör takip ediliyor")
+    print(f"📋 {len(enabled_ids)} profesör takip ediliyor")
     
     # Aktif AKBIS sayfalarını kontrol et
-    for prof in enabled_profs:
-        url = prof["url"]
-        name = prof["name"]
+    for i, page in enumerate(AKBIS_PAGES):
+        if i not in enabled_ids:
+            continue  # Bu profesör takip edilmiyor
+            
+        url = page["url"]
+        name = page["name"]
         
         print(f"Checking: {name}")
         
