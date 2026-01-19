@@ -162,6 +162,114 @@ def cleanup_old_records(days: int = 90):
     return deleted
 
 
+# ============ Professor Preferences ============
+
+def init_professor_preferences(professors: list):
+    """
+    Professor tercihlerini başlat.
+    Varsayılan olarak tüm profesörler aktif.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS professor_preferences (
+            professor_id INTEGER PRIMARY KEY,
+            name TEXT,
+            url TEXT,
+            enabled INTEGER DEFAULT 1
+        )
+    """)
+    
+    # Mevcut kayıtları kontrol et
+    cursor.execute("SELECT COUNT(*) FROM professor_preferences")
+    count = cursor.fetchone()[0]
+    
+    if count == 0:
+        # İlk kez - tüm profesörleri ekle (varsayılan: aktif)
+        for i, prof in enumerate(professors):
+            cursor.execute("""
+                INSERT OR IGNORE INTO professor_preferences (professor_id, name, url, enabled)
+                VALUES (?, ?, ?, 1)
+            """, (i, prof.get("name", ""), prof.get("url", "")))
+    
+    conn.commit()
+    conn.close()
+
+
+def get_professor_preferences() -> list:
+    """Tüm profesör tercihlerini getir"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT professor_id, name, url, enabled 
+        FROM professor_preferences 
+        ORDER BY professor_id
+    """)
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {"id": r[0], "name": r[1], "url": r[2], "enabled": bool(r[3])}
+        for r in results
+    ]
+
+
+def get_enabled_professors() -> list:
+    """Sadece aktif profesörleri getir"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT professor_id, name, url 
+        FROM professor_preferences 
+        WHERE enabled = 1
+        ORDER BY professor_id
+    """)
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {"id": r[0], "name": r[1], "url": r[2]}
+        for r in results
+    ]
+
+
+def set_professor_enabled(professor_id: int, enabled: bool) -> bool:
+    """Profesör takip durumunu ayarla"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        UPDATE professor_preferences 
+        SET enabled = ? 
+        WHERE professor_id = ?
+    """, (1 if enabled else 0, professor_id))
+    
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    
+    return updated
+
+
+def set_all_professors_enabled(enabled: bool):
+    """Tüm profesörlerin takip durumunu ayarla"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        UPDATE professor_preferences 
+        SET enabled = ?
+    """, (1 if enabled else 0,))
+    
+    conn.commit()
+    conn.close()
+
+
 if __name__ == "__main__":
     # Test
     print("Initializing database...")

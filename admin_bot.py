@@ -8,8 +8,12 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-from config import TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID, GITHUB_TOKEN, GITHUB_REPO
-from database import init_db, get_stats, set_status, get_status
+from config import TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID, GITHUB_TOKEN, GITHUB_REPO, AKBIS_PAGES
+from database import (
+    init_db, get_stats, set_status, get_status,
+    init_professor_preferences, get_professor_preferences,
+    set_professor_enabled, set_all_professors_enabled, get_enabled_professors
+)
 
 
 # Admin olup olmadığını kontrol et
@@ -26,10 +30,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 <b>AKBIS Duyuru Botu</b>\n\n"
         "Bu bot, Gaziantep Üniversitesi Elektrik-Elektronik Mühendisliği "
         "bölümü hocalarının AKBIS sayfalarından duyuruları takip eder.\n\n"
-        "<b>Admin Komutları:</b>\n"
+        "<b>Komutlar:</b>\n"
         "/status - Bot durumu\n"
-        "/check - Manuel kontrol\n"
-        "/setinterval - Kontrol aralığını ayarla\n"
+        "/list - Hoca listesi\n"
+        "/follow - Hoca takip et\n"
+        "/unfollow - Takibi bırak\n"
+        "/followall - Tümünü takip et\n"
+        "/unfollowmall - Takibi kaldır\n"
         "/help - Yardım\n",
         parse_mode="HTML"
     )
@@ -45,16 +52,137 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     stats = get_stats()
     interval = get_status("check_interval") or "5"
+    enabled = get_enabled_professors()
     
     await update.message.reply_text(
         f"📊 <b>Bot Durumu</b>\n\n"
         f"🔢 Toplam görülen: {stats['total_seen']}\n"
         f"📅 Son 24 saat: {stats['last_24h']}\n"
         f"⏰ Son kontrol: {stats['last_check']}\n"
-        f"⏱️ Kontrol aralığı: {interval} dakika\n\n"
+        f"⏱️ Kontrol aralığı: {interval} dakika\n"
+        f"👥 Takip edilen: {len(enabled)} hoca\n\n"
         f"✅ Bot aktif",
         parse_mode="HTML"
     )
+
+
+async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /list komutu - Tüm hocaları listeler
+    """
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Bu komut sadece admin için kullanılabilir.")
+        return
+    
+    # Tercihleri başlat
+    init_professor_preferences(AKBIS_PAGES)
+    prefs = get_professor_preferences()
+    
+    if not prefs:
+        await update.message.reply_text("❌ Hoca listesi bulunamadı.")
+        return
+    
+    message_parts = ["📋 <b>Hoca Listesi</b>\n"]
+    
+    for p in prefs:
+        status = "✅" if p["enabled"] else "❌"
+        # Kısa isim göster
+        short_name = p["name"].replace("Araştırma Görevlisi ", "Arş. Gör. ")
+        short_name = short_name.replace("Doktor Öğretim Üyesi ", "Dr. ")
+        message_parts.append(f"{status} <b>{p['id']}</b> - {short_name}")
+    
+    message_parts.append("\n<i>Kullanım:</i>")
+    message_parts.append("<code>/follow 5</code> - 5 numaralı hocayı takip et")
+    message_parts.append("<code>/unfollow 5</code> - 5 numaralı takibi bırak")
+    
+    await update.message.reply_text("\n".join(message_parts), parse_mode="HTML")
+
+
+async def follow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /follow <numara> komutu - Belirtilen hocayı takip eder
+    """
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Bu komut sadece admin için kullanılabilir.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "Kullanım: /follow <numara>\n"
+            "Örnek: /follow 5\n\n"
+            "Hoca numaralarını görmek için: /list"
+        )
+        return
+    
+    try:
+        prof_id = int(context.args[0])
+        
+        if set_professor_enabled(prof_id, True):
+            prefs = get_professor_preferences()
+            prof = next((p for p in prefs if p["id"] == prof_id), None)
+            name = prof["name"] if prof else f"#{prof_id}"
+            await update.message.reply_text(f"✅ <b>{name}</b> takip ediliyor.", parse_mode="HTML")
+        else:
+            await update.message.reply_text(f"❌ Hoca #{prof_id} bulunamadı. /list ile listeyi kontrol edin.")
+            
+    except ValueError:
+        await update.message.reply_text("❌ Geçersiz numara. Bir sayı girin.")
+
+
+async def unfollow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /unfollow <numara> komutu - Takibi bırakır
+    """
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Bu komut sadece admin için kullanılabilir.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "Kullanım: /unfollow <numara>\n"
+            "Örnek: /unfollow 5\n\n"
+            "Hoca numaralarını görmek için: /list"
+        )
+        return
+    
+    try:
+        prof_id = int(context.args[0])
+        
+        if set_professor_enabled(prof_id, False):
+            prefs = get_professor_preferences()
+            prof = next((p for p in prefs if p["id"] == prof_id), None)
+            name = prof["name"] if prof else f"#{prof_id}"
+            await update.message.reply_text(f"❌ <b>{name}</b> takibi bırakıldı.", parse_mode="HTML")
+        else:
+            await update.message.reply_text(f"❌ Hoca #{prof_id} bulunamadı.")
+            
+    except ValueError:
+        await update.message.reply_text("❌ Geçersiz numara. Bir sayı girin.")
+
+
+async def followall_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /followall komutu - Tüm hocaları takip eder
+    """
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Bu komut sadece admin için kullanılabilir.")
+        return
+    
+    set_all_professors_enabled(True)
+    count = len(get_enabled_professors())
+    await update.message.reply_text(f"✅ Tüm hocalar ({count}) takip ediliyor.")
+
+
+async def unfollowmall_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /unfollowmall komutu - Tüm takipleri kaldırır
+    """
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Bu komut sadece admin için kullanılabilir.")
+        return
+    
+    set_all_professors_enabled(False)
+    await update.message.reply_text("❌ Tüm takipler kaldırıldı. Hiçbir hoca takip edilmiyor.")
 
 
 async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,9 +244,6 @@ async def setinterval_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"⚠️ Not: GitHub Actions workflow'u manuel olarak güncellemeniz gerekebilir."
         )
         
-        # GitHub Actions cron'u güncelle (opsiyonel, gelişmiş özellik)
-        # Bu özellik için workflow'un dinamik olarak güncellenmesi gerekir
-        
     except ValueError:
         await update.message.reply_text("❌ Geçersiz değer. Bir sayı girin.")
 
@@ -129,15 +254,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(
         "📖 <b>AKBIS Bot Yardım</b>\n\n"
-        "<b>Genel Komutlar:</b>\n"
-        "/start - Bot hakkında bilgi\n"
-        "/help - Bu yardım mesajı\n\n"
-        "<b>Admin Komutları:</b>\n"
-        "/status - Bot durumu ve istatistikler\n"
-        "/check - Manuel duyuru kontrolü\n"
-        "/setinterval <dk> - Kontrol aralığını ayarla\n\n"
+        "<b>Hoca Takibi:</b>\n"
+        "/list - Tüm hocaları listele\n"
+        "/follow <no> - Hoca takip et\n"
+        "/unfollow <no> - Takibi bırak\n"
+        "/followall - Tümünü takip et\n"
+        "/unfollowmall - Tüm takipleri kaldır\n\n"
+        "<b>Genel:</b>\n"
+        "/status - Bot durumu\n"
+        "/check - Manuel kontrol\n"
+        "/setinterval <dk> - Kontrol aralığı\n\n"
         "<b>Örnek:</b>\n"
-        "<code>/setinterval 10</code> - Her 10 dakikada kontrol",
+        "<code>/follow 5</code> - 5. hocayı takip et",
         parse_mode="HTML"
     )
 
@@ -181,6 +309,7 @@ def main():
     
     # Veritabanını başlat
     init_db()
+    init_professor_preferences(AKBIS_PAGES)
     
     # Application oluştur
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -188,6 +317,11 @@ def main():
     # Komut handler'ları ekle
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("list", list_command))
+    app.add_handler(CommandHandler("follow", follow_command))
+    app.add_handler(CommandHandler("unfollow", unfollow_command))
+    app.add_handler(CommandHandler("followall", followall_command))
+    app.add_handler(CommandHandler("unfollowmall", unfollowmall_command))
     app.add_handler(CommandHandler("check", check_command))
     app.add_handler(CommandHandler("setinterval", setinterval_command))
     app.add_handler(CommandHandler("help", help_command))

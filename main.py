@@ -8,23 +8,36 @@ from typing import List
 
 from config import AKBIS_PAGES, EEE_PAGE
 from scraper import Announcement, scrape_akbis_page_v2, scrape_eee_page
-from database import init_db, is_seen, mark_seen, set_status, get_stats
+from database import (
+    init_db, is_seen, mark_seen, set_status, get_stats,
+    init_professor_preferences, get_enabled_professors
+)
 from telegram_bot import send_announcement, send_error_message
 
 
 def check_all_pages() -> List[Announcement]:
     """
     Tüm sayfaları kontrol et ve yeni duyuruları döndür.
+    Sadece takip edilen profesörleri kontrol eder.
     
     Returns:
         Yeni duyuru listesi
     """
     new_announcements = []
     
-    # AKBIS sayfalarını kontrol et
-    for page in AKBIS_PAGES:
-        url = page["url"]
-        name = page["name"]
+    # Veritabanından aktif profesörleri al
+    enabled_profs = get_enabled_professors()
+    
+    if not enabled_profs:
+        print("⚠️ Hiçbir profesör takip edilmiyor!")
+        return []
+    
+    print(f"📋 {len(enabled_profs)} profesör takip ediliyor")
+    
+    # Aktif AKBIS sayfalarını kontrol et
+    for prof in enabled_profs:
+        url = prof["url"]
+        name = prof["name"]
         
         print(f"Checking: {name}")
         
@@ -93,6 +106,9 @@ def main():
     
     # Veritabanını başlat
     init_db()
+    
+    # Profesör tercihlerini başlat (ilk çalıştırmada tümü aktif)
+    init_professor_preferences(AKBIS_PAGES)
     
     # Sayfaları kontrol et
     print("\n📡 Checking pages for new announcements...")
